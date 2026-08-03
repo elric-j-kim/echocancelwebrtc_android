@@ -1,0 +1,67 @@
+{
+	"kind" : "toolchains",
+	"toolchains" : 
+	[
+		{
+			"compiler" : 
+			{
+				"id" : "Clang",
+				"implicit" : 
+				{
+					"includeDirectories" : 
+					[
+						"C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1",
+						"C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/include",
+						"C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/aarch64-linux-android",
+						"C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include"
+					],
+					"linkDirectories" : 
+					[
+						"C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/lib/clang/21/lib/linux/aarch64",
+						"C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/aarch64-linux-android/24",
+						"C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib/aarch64-linux-android",
+						"C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/lib"
+					],
+					"linkFrameworkDirectories" : [],
+					"linkLibraries" : 
+					[
+						"c++",
+						"m",
+						"-l:libunwind.a",
+						"dl",
+						"c",
+						"-l:libunwind.a",
+						"dl"
+					]
+				},
+				"path" : "C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/toolchains/llvm/prebuilt/windows-x86_64/bin/clang++.exe",
+				"target" : "aarch64-none-linux-android24",
+				"version" : "21.0.0"
+			},
+			"language" : "CXX",
+			"sourceFileExtensions" : 
+			[
+				"C",
+				"M",
+				"c++",
+				"cc",
+				"cpp",
+				"cxx",
+				"m",
+				"mm",
+				"mpp",
+				"CPP",
+				"ixx",
+				"cppm",
+				"ccm",
+				"cxxm",
+				"c++m"
+			]
+		}
+	],
+	"version" : 
+	{
+		"major" : 1,
+		"minor" : 0
+	}
+}

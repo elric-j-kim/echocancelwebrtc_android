@@ -1,0 +1,13 @@
+{
+  "cmake.generator": "Ninja",
+  "cmake.configureSettings": {
+    "ANDROID_NDK": "C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638",
+    "CMAKE_TOOLCHAIN_FILE": "C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/build/cmake/android.toolchain.cmake",
+    "ANDROID_ABI": "arm64-v8a",
+    "ANDROID_PLATFORM": "android-24",
+    "CMAKE_MAKE_PROGRAM": "C:/ProgramData/chocolatey/lib/ninja/tools/ninja.exe"
+  },
+  //"C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.cppStandard": "c++20",
+  "cmake.useCMakePresets": "always"
+}
