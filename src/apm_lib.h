@@ -45,19 +45,19 @@
 
 extern "C" {
 	JNIEXPORT jlong JNICALL
-		Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativeCreate(
+		Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCreate(
 			JNIEnv* env, jclass, jint sample_rate_hz, jint channels);
 
 	JNIEXPORT jint JNICALL
-		Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativeProcessRender(
+		Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessRender(
 			JNIEnv* env, jclass, jlong native_handle, jobject pcm16, jint byte_count);
 
 	JNIEXPORT jint JNICALL
-		Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativeProcessCapture(
+		Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessCapture(
 			JNIEnv* env, jclass, jlong native_handle, jobject pcm16, jint byte_count,
 			jint stream_delay_ms);
 
 	JNIEXPORT void JNICALL
-		Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativeDestroy(
+		Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeDestroy(
 			JNIEnv*, jclass, jlong native_handle);
 }

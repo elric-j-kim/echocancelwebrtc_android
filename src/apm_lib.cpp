@@ -129,7 +129,7 @@ namespace {
 }  // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativeCreate(
+Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCreate(
     JNIEnv* env, jclass, jint sample_rate_hz, jint channels) {
     // WebRTC PCM16 인터페이스는 8/16/32/48 kHz만 지원.
     if (!IsNativePcm16Rate(sample_rate_hz) ||
@@ -164,7 +164,7 @@ Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativeCr
 // Android 미디어 채널 PCM을 AudioTrack.write() 직전에 호출.
 // pcm16은 10 ms의 크기만큼.
 extern "C" JNIEXPORT jint JNICALL
-Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativeProcessRender(
+Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessRender(
     JNIEnv* env, jclass, jlong native_handle, jobject pcm16, jint byte_count) {
     auto* handle = FromJlong<AecHandle>(native_handle);
     if (handle == nullptr) {
@@ -195,7 +195,7 @@ Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativePr
 
 // AudioRecord PCM을 제자리에서 AEC/NS 처리한다.
 extern "C" JNIEXPORT jint JNICALL
-Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativeProcessCapture(
+Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessCapture(
     JNIEnv* env, jclass, jlong native_handle, jobject pcm16, jint byte_count,
     jint stream_delay_ms) {
     auto* handle = FromJlong<AecHandle>(native_handle);
@@ -230,7 +230,7 @@ Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativePr
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_selvas_medivoice4androidkotlinsample_models_LocalEchoCanceller_nativeDestroy(
+Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeDestroy(
     JNIEnv*, jclass, jlong native_handle) {
     delete FromJlong<AecHandle>(native_handle);
 }
