@@ -37,6 +37,8 @@
 
 #include <cstdint>
 #include <mutex>
+#include <cmath>
+#include <algorithm>
 
 #include "api/audio/audio_processing.h"
 #include "api/audio/builtin_audio_processing_builder.h"
@@ -46,7 +48,7 @@
 extern "C" {
 	JNIEXPORT jlong JNICALL
 		Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCreate(
-			JNIEnv* env, jclass, jint sample_rate_hz, jint channels);
+			JNIEnv* env, jclass, jint sample_rate_hz, jint channels, jboolean isNSON, jboolean isAGCOn);
 
 	JNIEXPORT jint JNICALL
 		Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessRender(
@@ -60,4 +62,8 @@ extern "C" {
 	JNIEXPORT void JNICALL
 		Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeDestroy(
 			JNIEnv*, jclass, jlong native_handle);
+
+	JNIEXPORT jdouble JNICALL
+		Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCalculateRmsDb(
+			JNIEnv* env, jclass, jobject pcm16, jint byte_count);
 }

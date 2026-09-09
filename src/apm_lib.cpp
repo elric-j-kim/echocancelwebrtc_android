@@ -126,11 +126,30 @@ namespace {
             static_cast<size_t>(byte_count) % handle.frame_bytes == 0;
     }
 
+    // 16비트 양자화 잡음 바닥에 해당하는 dBFS 하한값.
+    constexpr double kMinDbfs = -96.0;
+
+    double ComputeRmsDbfs(const int16_t* samples, size_t sample_count) {
+        if (sample_count == 0) return kMinDbfs;
+
+        double sum_squares = 0.0;
+        for (size_t i = 0; i < sample_count; ++i) {
+            const double sample = samples[i];
+            sum_squares += sample * sample;
+        }
+
+        const double rms = std::sqrt(sum_squares / static_cast<double>(sample_count));
+        if (rms <= 0.0) return kMinDbfs;
+
+        const double dbfs = 20.0 * std::log10(rms / 32768.0);
+        return std::max(dbfs, kMinDbfs);
+    }
+
 }  // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
 Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCreate(
-    JNIEnv* env, jclass, jint sample_rate_hz, jint channels) {
+    JNIEnv* env, jclass, jint sample_rate_hz, jint channels, jboolean isNSON, jboolean isAGCOn) {
     // WebRTC PCM16 인터페이스는 8/16/32/48 kHz만 지원.
     if (!IsNativePcm16Rate(sample_rate_hz) ||
         (channels != 1 && channels != 2)) {
@@ -139,15 +158,22 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCreate(
     }
 
     webrtc::AudioProcessing::Config config;
-    config.echo_canceller.enabled = true;
-    config.high_pass_filter.enabled = true;
-    config.noise_suppression.enabled = true;
+    config.high_pass_filter.enabled = false; //echo_canceller 내부에 HPF 존재
+    
+    config.echo_canceller.enabled = true;  //AEC
+    
+    //config.noise_suppression.enabled = false;
+    config.noise_suppression.enabled = isNSON;
     config.noise_suppression.level =
-        webrtc::AudioProcessing::Config::NoiseSuppression::kHigh;
+        webrtc::AudioProcessing::Config::NoiseSuppression::kVeryHigh;
 
     // Android 마이크 gain을 이 JNI가 제어하지 않으므로 AGC는 비활성화.
     config.gain_controller1.enabled = false;
-    config.gain_controller2.enabled = false;
+
+    //config.gain_controller2.enabled = false;
+    config.gain_controller2.enabled = isAGCOn;
+    config.gain_controller2.adaptive_digital.enabled = isAGCOn;
+
 
     auto apm = webrtc::BuiltinAudioProcessingBuilder(config)
         .Build(webrtc::CreateEnvironment());
@@ -213,7 +239,7 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessCapture(
 
     std::lock_guard<std::mutex> lock(handle->mutex);
 
-    int result = handle->apm->set_stream_delay_ms(stream_delay_ms);
+    int result = handle->apm->set_stream_delay_ms(stream_delay_ms);  //AEC3 필터에 전달하는 스피커-마이크 간 추정지연 시간
     if (result != webrtc::AudioProcessing::kNoError) return result;
 
     for (size_t offset = 0; offset < static_cast<size_t>(byte_count);
@@ -233,4 +259,15 @@ extern "C" JNIEXPORT void JNICALL
 Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeDestroy(
     JNIEnv*, jclass, jlong native_handle) {
     delete FromJlong<AecHandle>(native_handle);
+}
+
+// PCM16 프레임의 RMS 음성 에너지를 dBFS(-96.0 ~ 0.0)로 반환.
+extern "C" JNIEXPORT jdouble JNICALL
+Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCalculateRmsDb(
+    JNIEnv* env, jclass, jobject pcm16, jint byte_count) {
+    int16_t* samples = GetPcm(env, pcm16, byte_count);
+    if (samples == nullptr) return kMinDbfs;
+
+    const size_t sample_count = static_cast<size_t>(byte_count) / sizeof(int16_t);
+    return ComputeRmsDbfs(samples, sample_count);
 }

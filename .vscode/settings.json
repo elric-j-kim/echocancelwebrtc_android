@@ -7,7 +7,7 @@
     "ANDROID_PLATFORM": "android-24",
     "CMAKE_MAKE_PROGRAM": "C:/ProgramData/chocolatey/lib/ninja/tools/ninja.exe"
   },
-  //"C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
   "C_Cpp.default.cppStandard": "c++20",
   "cmake.useCMakePresets": "always"
 }
