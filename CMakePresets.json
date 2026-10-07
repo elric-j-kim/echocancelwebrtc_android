@@ -1,7 +1,20 @@
 {
-  "version": 8,
+  "$comment": [
+    "Android NDK 크로스 컴파일용 CMake 프리셋 (JSON은 주석을 지원하지 않으므로 $comment 필드로 설명).",
+    "$comment 필드는 presets version 10 이상(CMake 3.31+)에서 지원된다.",
+    "사용법: cmake --preset <ABI>  →  cmake --build --preset <ABI>",
+    "출력: build/<ABI>/libapm_lib.so  (libs/<ABI>/libwebrtc_apm.a 가 존재해야 링크됨)"
+  ],
+  "version": 10,
   "configurePresets": [
     {
+      "$comment": [
+        "기본 프리셋. 64비트 ARM(대부분의 실기기). 다른 ABI 프리셋이 이 설정을 상속한다.",
+        "CMAKE_TOOLCHAIN_FILE: 설치된 NDK(30.0.15729638)의 Android 툴체인 — NDK 버전 변경 시 경로 수정",
+        "ANDROID_PLATFORM: 최소 지원 API 레벨 (android-24 = Android 7.0)",
+        "ANDROID_STL: c++_shared — 앱에 libc++_shared.so를 함께 패키징해야 함",
+        "CMAKE_MAKE_PROGRAM: Ninja 실행 파일 경로 (chocolatey 설치본)"
+      ],
       "name": "arm64-v8a",
       "generator": "Ninja",
       "binaryDir": "${sourceDir}/build/arm64-v8a",
@@ -14,12 +27,14 @@
       }
     },
     {
+      "$comment": "32비트 ARM. libs/armeabi-v7a/libwebrtc_apm.a 필요.",
       "name": "armeabi-v7a",
       "inherits": "arm64-v8a",
       "binaryDir": "${sourceDir}/build/armeabi-v7a",
       "cacheVariables": { "ANDROID_ABI": "armeabi-v7a" }
     },
     {
+      "$comment": "64비트 x86 (에뮬레이터용). libs/x86_64/libwebrtc_apm.a 필요.",
       "name": "x86_64",
       "inherits": "arm64-v8a",
       "binaryDir": "${sourceDir}/build/x86_64",

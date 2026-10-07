@@ -1,73 +1,22 @@
 ﻿#include "apm_lib.h"
 
-//#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, "apm_lib", __VA_ARGS__))
-//#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN, "apm_lib", __VA_ARGS__))
+// 전체 구조/처리 흐름 도식은 apm_lib.h 상단 주석 참고.
 //
-//extern "C" {
-//	/* 이 Trivial 함수는 이 동적 네이티브 라이브러리가 컴파일되는 플랫폼 ABI를 반환합니다.*/
-//	const char * apm_lib::getPlatformABI()
-//	{
-//	#if defined(__arm__)
-//	#if defined(__ARM_ARCH_7A__)
-//	#if defined(__ARM_NEON__)
-//		#define ABI "armeabi-v7a/NEON"
-//	#else
-//		#define ABI "armeabi-v7a"
-//	#endif
-//	#else
-//		#define ABI "armeabi"
-//	#endif
-//	#elif defined(__i386__)
-//		#define ABI "x86"
-//	#else
-//		#define ABI "unknown"
-//	#endif
-//		LOGI("This dynamic shared library is compiled with ABI: %s", ABI);
-//		return "This native library is compiled with ABI: %s" ABI ".";
-//	}
-//	
-//	void apm_lib()
-//	{
-//	}
-//
-//	apm_lib::apm_lib()
-//	{
-//	}
-//
-//	apm_lib::~apm_lib()
-//	{
-//	}
-//
-//
-//	apm_lib::APM_HANDLE Apm_Create(int sample_rate_hz, int channels) {
-//		// 1. WebRTC AudioProcessing 객체 생성
-//		webrtc::scoped_refptr<webrtc::AudioProcessing> apm =
-//			webrtc::AudioProcessingBuilderInterface().Create();
-//
-//		if (!apm) return nullptr;
-//
-//		// 2. 기본 APM 기능 활성화 (노이즈 억제, 에코 캔슬러 등)
-//		webrtc::AudioProcessing::Config config;
-//		config.echo_canceller.enabled = true;
-//		config.noise_suppression.enabled = true;
-//		config.noise_suppression.level =
-//			webrtc::AudioProcessing::Config::NoiseSuppression::kHigh;
-//		config.gain_controller1.enabled = true;
-//		apm->ApplyConfig(config);
-//
-//		// 3. 컨텍스트 객체 생성 후 C 핸들(void*)로 반환
-//		ApmContext* ctx = new ApmContext(sample_rate_hz, channels);
-//		ctx->apm = apm;
-//
-//		return static_cast<APM_HANDLE>(ctx);
-//	}
-//}
-
-
-
+// [파일 구성]
+//  1. 익명 namespace
+//     - AecHandle      : jlong 핸들이 가리키는 인스턴스 (apm + nearend 미러 detector 상태)
+//     - JNI 헬퍼       : 핸들 변환, 예외 throw, DirectByteBuffer 검증, RMS dBFS 계산
+//  2. JNI 구현
+//     - 생성/해제      : nativeCreate, nativeDestroy
+//     - 오디오 처리    : nativeProcessRender (far-end), nativeProcessCapture (near-end)
+//     - 상태/통계 조회 : nativeGetLikelihoodFiltered, nativeSetNearEndDetectorConfig,
+//                        nativeIsNearEndState, nativeCalculateRmsDb
+//  3. (주석 처리) 초기 C 스타일 apm_lib 클래스 구현 — 참고용
 
 namespace {
 
+    // nativeCreate에서 new로 생성되어 jlong 핸들로 Kotlin에 전달되고,
+    // nativeDestroy에서 delete된다.
     struct AecHandle {
         AecHandle(int sample_rate_hz, int channels)
             : stream_config(sample_rate_hz, channels),
@@ -88,6 +37,7 @@ namespace {
         std::unique_ptr<webrtc::DominantNearendDetector> nearend_detector;
         webrtc::Aec3Fft fft;
         bool nearend_state = false;
+        
 
         // StreamConfig::num_samples()는 채널 수까지 곱해진 인터리브 샘플 개수이므로
         // (num_channels * num_frames), 지원 대역 중 가장 긴 프레임인
@@ -102,7 +52,21 @@ namespace {
         std::array<float, webrtc::kFftLengthBy2 - 1> nearend_pre_carry{};
         std::array<float, webrtc::kFftLengthBy2 - 1> nearend_post_carry{};
         size_t nearend_carry_count = 0;
+
+        // enr/snr threshold 튜닝을 위한 임시 진단 로그 스로틀링(블록 단위).
+        static constexpr int kNearendLogIntervalBlocks = 25;
+        int nearend_log_counter = 0;
+
+        // 블록(4ms) 단위 원시 스펙트럼은 NS/AEC의 순간적인 변동 때문에 너무 튀어서
+        // (배경소음만 있어도 enr 문턱을 순간적으로 넘나듦) enr/snr 비교 전에 EMA로
+        // 평활화한다. alpha ~= 2/(N+1), N=12블록(약 48ms) 기준.
+        static constexpr float kNearendSpectrumSmoothingAlpha = 0.15f;
+        std::array<float, webrtc::kFftLengthBy2Plus1> nearend_spectrum_smoothed{};
+        std::array<float, webrtc::kFftLengthBy2Plus1> residual_echo_spectrum_smoothed{};
+        bool nearend_smoothing_initialized = false;
     };
+
+    float full_power_pcm = 32768.0f * 32768.0f;
 
     template <typename T>
     jlong ToJlong(T* p) {
@@ -182,7 +146,8 @@ namespace {
 }  // namespace
 
 extern "C" JNIEXPORT jlong JNICALL
-Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCreate(
+//Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCreate(
+Java_selvas_webrtc_apm_EchoCancel_CreateAPMHandle(
     JNIEnv* env, jclass, jint sample_rate_hz, jint channels, jboolean isNSON, jboolean isAGCOn) {
     // WebRTC PCM16 인터페이스는 8/16/32/48 kHz만 지원.
     if (!IsNativePcm16Rate(sample_rate_hz) ||
@@ -209,7 +174,11 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCreate(
     config.gain_controller2.adaptive_digital.enabled = isAGCOn;
 
 
+    // residual_echo_likelihood 등 잔여 에코 통계는 BuiltinAudioProcessingBuilder가
+    // 기본으로 생성하지 않으므로, EchoDetector를 명시적으로 주입해야 GetStatistics()가
+    // nullopt가 아닌 값을 채운다.
     auto apm = webrtc::BuiltinAudioProcessingBuilder(config)
+        .SetEchoDetector(webrtc::CreateEchoDetector())
         .Build(webrtc::CreateEnvironment());
     if (apm == nullptr) {
         ThrowIllegalArgument(env, "Failed to create WebRTC AudioProcessing");
@@ -221,10 +190,10 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCreate(
     return ToJlong(handle);
 }
 
-// Android 미디어 채널 PCM을 AudioTrack.write() 직전에 호출.
+// 스피커 신호 전달. Android 스피커 PCM을 출력 직전에 호출할 필요는 없음.
 // pcm16은 10 ms의 크기만큼.
 extern "C" JNIEXPORT jint JNICALL
-Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessRender(
+Java_selvas_webrtc_apm_EchoCancel_ProcessRender(
     JNIEnv* env, jclass, jlong native_handle, jobject pcm16, jint byte_count) {
     auto* handle = FromJlong<AecHandle>(native_handle);
     if (handle == nullptr) {
@@ -255,7 +224,7 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessRender(
 
 // AudioRecord PCM을 제자리에서 AEC/NS 처리하고, 처리된 동일 버퍼를 반환한다.
 extern "C" JNIEXPORT jobject JNICALL
-Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessCapture(
+Java_selvas_webrtc_apm_EchoCancel_ProcessCapture(
     JNIEnv* env, jclass, jlong native_handle, jobject pcm16, jint byte_count,
     jint stream_delay_ms) {
     auto* handle = FromJlong<AecHandle>(native_handle);
@@ -279,6 +248,7 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessCapture(
             return nullptr;
         }
     }
+
 
     const size_t frame_samples = handle->stream_config.num_samples();
 
@@ -363,16 +333,56 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessCapture(
                     residual_echo_fft.Spectrum(webrtc::Aec3Optimization::kNone,
                                                 residual_echo_spectrum);
 
+                    // 블록 단위 원시 스펙트럼은 NS/AEC의 순간 변동 때문에 너무 튀므로
+                    // (배경소음만 있어도 enr 문턱을 순간적으로 넘나듦) EMA로 평활화한 뒤
+                    // 비교에 사용한다. 첫 블록은 초기값을 그대로 채택해 0에서부터
+                    // 서서히 올라오는 편향을 없앤다.
+                    if (!handle->nearend_smoothing_initialized) {
+                        handle->nearend_spectrum_smoothed = nearend_spectrum;
+                        handle->residual_echo_spectrum_smoothed = residual_echo_spectrum;
+                        handle->nearend_smoothing_initialized = true;
+                    } else {
+                        constexpr float kAlpha = AecHandle::kNearendSpectrumSmoothingAlpha;
+                        for (size_t i = 0; i < webrtc::kFftLengthBy2Plus1; ++i) {
+                            handle->nearend_spectrum_smoothed[i] +=
+                                kAlpha * (nearend_spectrum[i] - handle->nearend_spectrum_smoothed[i]);
+                            handle->residual_echo_spectrum_smoothed[i] +=
+                                kAlpha * (residual_echo_spectrum[i] -
+                                          handle->residual_echo_spectrum_smoothed[i]);
+                        }
+                    }
+
                     handle->nearend_detector->Update(
                         std::span<const std::array<float, webrtc::kFftLengthBy2Plus1>>(
-                            &nearend_spectrum, 1),
+                            &handle->nearend_spectrum_smoothed, 1),
                         std::span<const std::array<float, webrtc::kFftLengthBy2Plus1>>(
-                            &residual_echo_spectrum, 1),
+                            &handle->residual_echo_spectrum_smoothed, 1),
                         std::span<const std::array<float, webrtc::kFftLengthBy2Plus1>>(
                             &comfort_noise_spectrum, 1),
                         /*initial_state=*/false);
 
                     handle->nearend_state = handle->nearend_detector->IsNearendState();
+
+                    // enr_threshold/snr_threshold 튜닝용 임시 진단 로그.
+                    // comfort_noise_spectrum이 항상 0이라 snr 조건은 사실상 무력화되어 있으므로,
+                    // 여기서 실제 nearend_power/echo_power 비율을 확인해 enr_threshold를 잡는다.
+                    if (++handle->nearend_log_counter >= AecHandle::kNearendLogIntervalBlocks) {
+                        handle->nearend_log_counter = 0;
+                        float nearend_power = std::accumulate(
+                            handle->nearend_spectrum_smoothed.begin(),
+                            handle->nearend_spectrum_smoothed.end(), 0.f) / handle->nearend_spectrum_smoothed.size();
+                        nearend_power = nearend_power / full_power_pcm;
+                        float echo_power = std::accumulate(
+                            handle->residual_echo_spectrum_smoothed.begin(),
+                            handle->residual_echo_spectrum_smoothed.end(), 0.f) / handle->residual_echo_spectrum_smoothed.size();
+                        echo_power = echo_power / full_power_pcm;
+                        __android_log_print(
+                            ANDROID_LOG_DEBUG, "apm_lib_nearend",
+                            "nearend_power=%.4f echo_power=%.4f ratio=%.4f state=%d",
+                            nearend_power, echo_power,
+                            echo_power > 0.f ? nearend_power / echo_power : -1.f,
+                            handle->nearend_state ? 1 : 0);
+                    }
                 }
 
                 handle->nearend_carry_count = pending_count - block_offset;
@@ -384,13 +394,84 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeProcessCapture(
         }
     }
 
+    //double isAECDone = handle->apm->GetStatistics(true).residual_echo_likelihood.value();
+
     return pcm16;  // 제자리 처리된 동일 버퍼를 그대로 반환 (추가 할당 없음)
 }
 
+extern "C" JNIEXPORT jdouble JNICALL
+Java_selvas_webrtc_apm_EchoCancel_GetLikelihoodFiltered(
+    JNIEnv* env, jclass, jlong native_handle) {
+        auto* handle = FromJlong<AecHandle>(native_handle);
+        if (handle == nullptr) {
+            ThrowIllegalArgument(env, "invalid AEC handle");
+            return 0;
+        }
+
+        const webrtc::AudioProcessingStats stats = handle->apm->GetStatistics(true);
+
+        std::optional<double> likelihood = stats.residual_echo_likelihood;
+
+        std::optional<int32_t> delay_ms = stats.delay_ms;
+        std::optional<double> erle = stats.echo_return_loss_enhancement;
+        std::optional<double> erl = stats.echo_return_loss;
+        std::optional<double> divergent = stats.divergent_filter_fraction;
+
+
+        if(delay_ms != std::nullopt && erle != std::nullopt && divergent != std::nullopt){
+            __android_log_print(
+                                ANDROID_LOG_DEBUG, "apm_lib_nearend",
+                                "delay_ms=%.1f erle=%.1f div=%.1f",
+                                delay_ms.value(), erle.value(),
+                                divergent.value());                                 
+        }
+
+
+
+        if(delay_ms != std::nullopt){
+            __android_log_print(
+                                ANDROID_LOG_DEBUG, "apm_lib_nearend",
+                                "delay_ms=%d",
+                                delay_ms.value());                                 
+        }
+        
+        if(erle != std::nullopt){
+            __android_log_print(
+                                ANDROID_LOG_DEBUG, "apm_lib_nearend",
+                                "erle=%.1f",
+                                erle.value());                                 
+        }
+
+        if(erl != std::nullopt){
+            __android_log_print(
+                                ANDROID_LOG_DEBUG, "apm_lib_nearend",
+                                "erl=%.1f",
+                                erl.value());                                 
+        }
+
+        if(divergent != std::nullopt){
+            __android_log_print(
+                                ANDROID_LOG_DEBUG, "apm_lib_nearend",
+                                "divergent=%.1f",
+                                divergent.value());                                 
+        }
+
+
+
+
+        if(likelihood == std::nullopt){
+            return 0;
+        }
+        else{
+            double likelihoodEchoResident = likelihood.value();
+            return 1.0 - likelihoodEchoResident;
+        }
+}
+		
 // dominant nearend 상태 조회용 미러 detector의 threshold 설정.
 // 실제 AEC3 처리 config(nativeCreate)에는 반영되지 않는 별도 인스턴스이다.
 extern "C" JNIEXPORT void JNICALL
-Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeSetNearEndDetectorConfig(
+Java_selvas_webrtc_apm_EchoCancel_SetNearEndDetectorConfig(
     JNIEnv* env, jclass, jlong native_handle, jfloat enrThreshold, jfloat snrThreshold) {
     auto* handle = FromJlong<AecHandle>(native_handle);
     if (handle == nullptr) {
@@ -407,11 +488,12 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeSetNearEndDetec
         nearend_config, handle->num_capture_channels);
     handle->nearend_state = false;
     handle->nearend_carry_count = 0;  // 이전 carry는 재구성된 detector와 무관하므로 폐기
+    handle->nearend_smoothing_initialized = false;  // 평활화 상태도 새 detector 기준으로 재시작
 }
 
 // nativeSetNearEndDetectorConfig() 호출 전이면 항상 false를 반환한다.
 extern "C" JNIEXPORT jboolean JNICALL
-Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeIsNearEndState(
+Java_selvas_webrtc_apm_EchoCancel_IsNearEndState(
     JNIEnv* env, jclass, jlong native_handle) {
     auto* handle = FromJlong<AecHandle>(native_handle);
     if (handle == nullptr) {
@@ -423,14 +505,14 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeIsNearEndState(
 }
 
 extern "C" JNIEXPORT void JNICALL
-Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeDestroy(
+Java_selvas_webrtc_apm_EchoCancel_DestroyAPMHandle(
     JNIEnv*, jclass, jlong native_handle) {
     delete FromJlong<AecHandle>(native_handle);
 }
 
 // PCM16 프레임의 RMS 음성 에너지를 dBFS(-96.0 ~ 0.0)로 반환.
 extern "C" JNIEXPORT jdouble JNICALL
-Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCalculateRmsDb(
+Java_selvas_webrtc_apm_EchoCancel_CalculateRmsDb(
     JNIEnv* env, jclass, jobject pcm16, jint byte_count) {
     int16_t* samples = GetPcm(env, pcm16, byte_count);
     if (samples == nullptr) return kMinDbfs;
@@ -438,3 +520,67 @@ Java_com_selvas_echocancelsample_models_LocalEchoCanceller_nativeCalculateRmsDb(
     const size_t sample_count = static_cast<size_t>(byte_count) / sizeof(int16_t);
     return ComputeRmsDbfs(samples, sample_count);
 }
+
+
+//#define LOGI(...) ((void)__android_log_print(ANDROID_LOG_INFO, "apm_lib", __VA_ARGS__))
+//#define LOGW(...) ((void)__android_log_print(ANDROID_LOG_WARN, "apm_lib", __VA_ARGS__))
+//
+//extern "C" {
+//	/* 이 Trivial 함수는 이 동적 네이티브 라이브러리가 컴파일되는 플랫폼 ABI를 반환합니다.*/
+//	const char * apm_lib::getPlatformABI()
+//	{
+//	#if defined(__arm__)
+//	#if defined(__ARM_ARCH_7A__)
+//	#if defined(__ARM_NEON__)
+//		#define ABI "armeabi-v7a/NEON"
+//	#else
+//		#define ABI "armeabi-v7a"
+//	#endif
+//	#else
+//		#define ABI "armeabi"
+//	#endif
+//	#elif defined(__i386__)
+//		#define ABI "x86"
+//	#else
+//		#define ABI "unknown"
+//	#endif
+//		LOGI("This dynamic shared library is compiled with ABI: %s", ABI);
+//		return "This native library is compiled with ABI: %s" ABI ".";
+//	}
+//	
+//	void apm_lib()
+//	{
+//	}
+//
+//	apm_lib::apm_lib()
+//	{
+//	}
+//
+//	apm_lib::~apm_lib()
+//	{
+//	}
+//
+//
+//	apm_lib::APM_HANDLE Apm_Create(int sample_rate_hz, int channels) {
+//		// 1. WebRTC AudioProcessing 객체 생성
+//		webrtc::scoped_refptr<webrtc::AudioProcessing> apm =
+//			webrtc::AudioProcessingBuilderInterface().Create();
+//
+//		if (!apm) return nullptr;
+//
+//		// 2. 기본 APM 기능 활성화 (노이즈 억제, 에코 캔슬러 등)
+//		webrtc::AudioProcessing::Config config;
+//		config.echo_canceller.enabled = true;
+//		config.noise_suppression.enabled = true;
+//		config.noise_suppression.level =
+//			webrtc::AudioProcessing::Config::NoiseSuppression::kHigh;
+//		config.gain_controller1.enabled = true;
+//		apm->ApplyConfig(config);
+//
+//		// 3. 컨텍스트 객체 생성 후 C 핸들(void*)로 반환
+//		ApmContext* ctx = new ApmContext(sample_rate_hz, channels);
+//		ctx->apm = apm;
+//
+//		return static_cast<APM_HANDLE>(ctx);
+//	}
+//}

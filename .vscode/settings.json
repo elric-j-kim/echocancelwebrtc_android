@@ -1,5 +1,11 @@
+// VS Code 워크스페이스 설정 (CMake Tools + C/C++ 확장)
+// 빌드 구성의 기준은 CMakePresets.json 이며, 이 파일은 IDE 연동용 설정만 담는다.
 {
+  // 빌드 생성기. CMakePresets.json의 generator와 동일하게 유지.
   "cmake.generator": "Ninja",
+
+  // 프리셋을 사용하지 않을 때만 적용되는 configure 변수.
+  // 아래 "cmake.useCMakePresets": "always" 이므로 현재는 무시되며, 실제 값은 CMakePresets.json 참고.
   "cmake.configureSettings": {
     "ANDROID_NDK": "C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638",
     "CMAKE_TOOLCHAIN_FILE": "C:/Users/elric.j.kim/AppData/Local/Android/Sdk/ndk/30.0.15729638/build/cmake/android.toolchain.cmake",
@@ -7,7 +13,12 @@
     "ANDROID_PLATFORM": "android-24",
     "CMAKE_MAKE_PROGRAM": "C:/ProgramData/chocolatey/lib/ninja/tools/ninja.exe"
   },
+
+  // IntelliSense가 CMake Tools의 compile_commands(include 경로, 매크로)를 사용하도록 지정.
   "C_Cpp.default.configurationProvider": "ms-vscode.cmake-tools",
+  // CMakeLists.txt의 CMAKE_CXX_STANDARD 20 과 일치.
   "C_Cpp.default.cppStandard": "c++20",
+
+  // 항상 CMakePresets.json의 프리셋(arm64-v8a / armeabi-v7a / x86_64)으로 configure/build.
   "cmake.useCMakePresets": "always"
 }
